@@ -251,7 +251,6 @@ class CanonicalInput:
         Attributes:
             :return : (?, 9, 9) representation of the game state
         """
-        logger.debug("enter")
         board_features = self._create_board_features()
         hand_features = self._create_hand_features()
         game_features = self._create_game_features()

@@ -61,7 +61,7 @@ class ResourceConfig:
         self.next_generation_model_config_filename = "model_config.json"
         self.next_generation_model_weight_filename = "model_weight.h5"
 
-        self.play_data_dir = os.path.join(self.data_dir, "play_data")
+        self.play_data_dir = os.path.join(self.data_dir, "play_data1")
         self.play_data_filename_tmpl = "play_%s.pkl"
 
         self.log_dir = os.path.join(self.project_dir, "logs")

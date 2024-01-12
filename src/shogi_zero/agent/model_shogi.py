@@ -1,41 +1,21 @@
-"""
-Defines the actual model for making policy and value predictions given an observation.
-"""
-
 import ftplib
 import hashlib
 import json
 import os
 from logging import getLogger
 
-from keras.engine.topology import Input
-from keras.engine.training import Model
-from keras.layers.convolutional import Conv2D
-from keras.layers.core import Activation, Dense, Flatten
-from keras.layers.merge import Add
-from keras.layers.normalization import BatchNormalization
-from keras.regularizers import l2
+import tensorflow as tf
+from tensorflow.keras.layers import Input, Conv2D, Activation, Dense, Flatten, Add, BatchNormalization
+from tensorflow.keras.models import Model
+from tensorflow.keras.regularizers import l2
 
 from shogi_zero.agent.api_shogi import ShogiModelAPI
 from shogi_zero.config import Config
-
-# noinspection PyPep8Naming
 
 logger = getLogger(__name__)
 
 
 class ShogiModel:
-    """
-    The model which can be trained to take observations of a game of shogi and return value and policy
-    predictions.
-
-    Attributes:
-        :ivar Config config: configuration to use
-        :ivar Model model: the Keras model to use for predictions
-        :ivar digest: basically just a hash of the file containing the weights being used by this model
-        :ivar ShogiModelAPI api: the api to use to listen for and then return this models predictions (on a pipe).
-    """
-
     def __init__(self, config: Config):
         self.config = config
         self.model = None  # type: Model
@@ -43,49 +23,36 @@ class ShogiModel:
         self.api = None
 
     def get_pipes(self, num=1):
-        """
-        Creates a list of pipes on which observations of the game state will be listened for. Whenever
-        an observation comes in, returns policy and value network predictions on that pipe.
-
-        :param int num: number of pipes to create
-        :return str(Connection): a list of all connections to the pipes that were created
-        """
         if self.api is None:
             self.api = ShogiModelAPI(self)
             self.api.start()
         return [self.api.create_pipe() for _ in range(num)]
 
     def build(self):
-        """
-        Builds the full Keras model and stores it in self.model.
-        """
         mc = self.config.model
         in_x = x = Input((44, 9, 9))
 
-        # (batch, channels, height, width)
         x = Conv2D(filters=mc.cnn_filter_num, kernel_size=mc.cnn_first_filter_size, padding="same",
-                   data_format="channels_first", use_bias=False, kernel_regularizer=l2(mc.l2_reg),
-                   name="input_conv-" + str(mc.cnn_first_filter_size) + "-" + str(mc.cnn_filter_num))(x)
-        x = BatchNormalization(axis=1, name="input_batchnorm")(x)
-        x = Activation("relu", name="input_relu")(x)
+                   data_format="channels_first", use_bias=False, kernel_regularizer=l2(mc.l2_reg))(x)
+        x = BatchNormalization(axis=1)(x)
+        x = Activation("relu")(x)
 
         for i in range(mc.res_layer_num):
             x = self._build_residual_block(x, i + 1)
 
         res_out = x
 
-        # for policy output
-        x = Conv2D(filters=2, kernel_size=1, data_format="channels_first", use_bias=False, kernel_regularizer=l2(mc.l2_reg),
+        x = Conv2D(filters=2, kernel_size=1, data_format="channels_first", use_bias=False,
+                   kernel_regularizer=l2(mc.l2_reg),
                    name="policy_conv-1-2")(res_out)
         x = BatchNormalization(axis=1, name="policy_batchnorm")(x)
         x = Activation("relu", name="policy_relu")(x)
         x = Flatten(name="policy_flatten")(x)
-        # no output for 'pass'
-        policy_out = Dense(self.config.n_labels, kernel_regularizer=l2(
-            mc.l2_reg), activation="softmax", name="policy_out")(x)
+        policy_out = Dense(self.config.n_labels, kernel_regularizer=l2(mc.l2_reg), activation="softmax",
+                           name="policy_out")(x)
 
-        # for value output
-        x = Conv2D(filters=4, kernel_size=1, data_format="channels_first", use_bias=False, kernel_regularizer=l2(mc.l2_reg),
+        x = Conv2D(filters=4, kernel_size=1, data_format="channels_first", use_bias=False,
+                   kernel_regularizer=l2(mc.l2_reg),
                    name="value_conv-1-4")(res_out)
         x = BatchNormalization(axis=1, name="value_batchnorm")(x)
         x = Activation("relu", name="value_relu")(x)
@@ -121,12 +88,6 @@ class ShogiModel:
             return m.hexdigest()
 
     def load(self, config_path, weight_path):
-        """
-
-        :param str config_path: path to the file containing the entire configuration
-        :param str weight_path: path to the file containing the model weights
-        :return: true iff successful in loading
-        """
         mc = self.config.model
         resources = self.config.resource
         if mc.distributed and config_path == resources.model_best_config_path:
@@ -144,9 +105,10 @@ class ShogiModel:
         if os.path.exists(config_path) and os.path.exists(weight_path):
             logger.debug(f"loading model from {config_path}")
             with open(config_path, "rt") as f:
-                self.model = Model.from_config(json.load(f))
+                self.model = tf.keras.models.model_from_json(json.load(f))
             self.model.load_weights(weight_path)
-            self.model._make_predict_function()
+            #print(self.model)
+            #self.model._make_predict_function()
             self.digest = self.fetch_digest(weight_path)
             logger.debug(f"loaded model digest = {self.digest}")
             return True
@@ -155,15 +117,10 @@ class ShogiModel:
             return False
 
     def save(self, config_path, weight_path):
-        """
-
-        :param str config_path: path to save the entire configuration to
-        :param str weight_path: path to save the model weights to
-        """
         logger.debug(f"save model to {config_path}")
         with open(config_path, "wt") as f:
-            json.dump(self.model.get_config(), f)
-            self.model.save_weights(weight_path)
+            json.dump(self.model.to_json(), f)
+        self.model.save_weights(weight_path)
         self.digest = self.fetch_digest(weight_path)
         logger.debug(f"saved model digest {self.digest}")
 

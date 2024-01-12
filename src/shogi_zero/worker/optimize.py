@@ -13,14 +13,47 @@ import numpy as np
 
 from shogi_zero.agent.model_shogi import ShogiModel
 from shogi_zero.config import Config
-#from shogi_zero.env.shogi_env import canon_input_planes, is_black_turn, testeval
+# from shogi_zero.env.shogi_env import canon_input_planes, is_black_turn, testeval
 from shogi_zero.env.shogi_env import SfenInfo, CanonicalInput
 from shogi_zero.lib.data_helper import get_game_data_filenames, read_game_data_from_file, get_next_generation_model_dirs
 from shogi_zero.lib.model_helper import load_best_model_weight
 
 from keras.optimizers import Adam
 from keras.callbacks import TensorBoard
+
 logger = getLogger(__name__)
+
+import os
+from keras.utils import Sequence
+import tensorflow as tf
+
+
+def _parse_function(proto):
+    feature_description = {
+        'state': tf.io.FixedLenFeature([], tf.string),
+        'policy': tf.io.FixedLenFeature([], tf.string),
+        'value': tf.io.FixedLenFeature([], tf.string),
+    }
+    parsed_features = tf.io.parse_single_example(proto, feature_description)
+
+    state = tf.io.parse_tensor(parsed_features['state'], out_type=tf.float32)
+    state = tf.reshape(state, [44, 9, 9])
+
+    policy = tf.io.parse_tensor(parsed_features['policy'], out_type=tf.float32)
+    policy = tf.reshape(policy, [4845])
+
+    value = tf.io.parse_tensor(parsed_features['value'], out_type=tf.float32)
+    value = tf.reshape(value, [])
+
+    return state, policy, value
+
+
+class ShogiDataset:
+    def __init__(self, folder, batch_size):
+        files = tf.data.Dataset.list_files(f"{folder}/dataset*.tfrecord")
+        dataset = files.interleave(tf.data.TFRecordDataset, cycle_length=8)
+        parsed_dataset = dataset.map(_parse_function)
+        self.dataset = parsed_dataset.batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE)
 
 
 def start(config: Config):
@@ -48,8 +81,7 @@ class OptimizeWorker:
     def __init__(self, config: Config):
         self.config = config
         self.model = None  # type: ShogiModel
-        self.dataset = deque(), deque(), deque()
-        self.executor = ProcessPoolExecutor(max_workers=config.trainer.cleaning_processes)
+        self.dataset = ShogiDataset('kif_dataset', 128)
 
     def start(self):
         """
@@ -58,7 +90,7 @@ class OptimizeWorker:
         self.model = self.load_model()
         self.training()
 
-    def training(self):
+    '''def training(self):
         """
         Does the actual training of the model, running it on game data. Endless.
         """
@@ -76,7 +108,26 @@ class OptimizeWorker:
             while len(a) > self.config.trainer.dataset_size / 2:
                 a.popleft()
                 b.popleft()
-                c.popleft()
+                c.popleft()'''
+
+    def training(self):
+        """
+        Does the actual training of the model, running it on game data. Endless.
+        """
+        self.compile_model()
+        total_steps = self.config.trainer.start_total_steps
+
+        while True:
+            tensorboard_cb = TensorBoard(log_dir="./logs", batch_size=self.config.trainer.batch_size, histogram_freq=1)
+            self.model.model.fit(
+                self.dataset.dataset,
+                epochs=self.config.trainer.epoch_to_checkpoint,
+                shuffle=True,
+                callbacks=[tensorboard_cb]
+            )
+
+            total_steps += 1
+            self.save_current_model()
 
     def train_epoch(self, epochs):
         """
@@ -212,4 +263,5 @@ def convert_to_cheating_data(data):
         policy_list.append(policy)
         value_list.append(sl_value)
 
-    return np.asarray(state_list, dtype=np.float32), np.asarray(policy_list, dtype=np.float32), np.asarray(value_list, dtype=np.float32)
+    return np.asarray(state_list, dtype=np.float32), np.asarray(policy_list, dtype=np.float32), np.asarray(value_list,
+                                                                                                           dtype=np.float32)

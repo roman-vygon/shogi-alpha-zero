@@ -2,9 +2,7 @@
 Contains the worker for training the model using recorded game data rather than self-play
 """
 import os
-from collections import deque
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor
 from logging import getLogger
 from threading import Thread
 from time import time
@@ -83,7 +81,7 @@ class SupervisedLearningWorker:
 
     def save_data(self, data, game_id):
         rc = self.config.resource
-        path = os.path.join(rc.play_data_dir, rc.play_data_filename_tmpl % game_id)
+        path = os.path.join(rc.play_data_dir, rc.play_data_filename_tmpl % os.path.basename(game_id))
         logger.info(f"save play data to {path}")
         thread = Thread(target=write_game_data_to_file, args=(path, data))
         thread.start()
